@@ -1,43 +1,76 @@
 import 'dart:ffi';
-import 'package:ffi/ffi.dart';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:ffi/ffi.dart';
 
-void main() => runApp(const MaterialApp(
-  home: MemoryInspectorApp(),
-  debugShowCheckedModeBanner: false,
-));
+void main() {
+  runApp(const MemoryInspectorApp());
+}
 
-class MemoryInspectorApp extends StatefulWidget {
+class MemoryInspectorApp extends StatelessWidget {
   const MemoryInspectorApp({super.key});
 
   @override
-  State<MemoryInspectorApp> createState() => _MemoryInspectorAppState();
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      theme: ThemeData.dark().copyWith(
+        primaryColor: Colors.purple,
+        scaffoldBackgroundColor: const Color(0xFF0D0221), // Deep space blue
+      ),
+      home: const NativeInspectorHome(),
+    );
+  }
 }
 
-class _MemoryInspectorAppState extends State<MemoryInspectorApp> {
-  final TextEditingController _controller = TextEditingController(text: '42');
-  String _selectedType = 'Int32';
-  List<int> _bytes = [];
-  int? _address;
+class NativeInspectorHome extends StatefulWidget {
+  const NativeInspectorHome({super.key});
+
+  @override
+  State<NativeInspectorHome> createState() => _NativeInspectorHomeState();
+}
+
+class _NativeInspectorHomeState extends State<NativeInspectorHome> {
+  final TextEditingController _valController = TextEditingController(text: "123");
+  final TextEditingController _sizeController = TextEditingController(text: "12"); // Default 12 bytes
+
   Pointer<Uint8>? _currentPtr;
+  int _address = 0;
+  List<int> _bytes = [];
+  String _selectedType = 'Int32';
+
+  @override
+  void dispose() {
+    if (_currentPtr != null) malloc.free(_currentPtr!);
+    super.dispose();
+  }
 
   void _runInspection() {
+    // 1. Free previous memory to prevent leaks
     if (_currentPtr != null) {
       malloc.free(_currentPtr!);
     }
 
-    final userInput = _controller.text;
-    int size = (_selectedType == 'Double') ? 8 : 4;
-    _currentPtr = malloc<Uint8>(size);
+    // 2. Parse User Inputs
+    final String valText = _valController.text;
+    final int customSize = int.tryParse(_sizeController.text) ?? 4;
 
-    if (_selectedType == 'Int32') {
-      _currentPtr!.cast<Int32>().value = int.tryParse(userInput) ?? 0;
-    } else {
-      _currentPtr!.cast<Double>().value = double.tryParse(userInput) ?? 0.0;
+    // 3. Allocate the exact number of bytes requested (Simulating a Struct size)
+    _currentPtr = malloc<Uint8>(customSize);
+
+    // 4. "Inject" value based on type if space allows
+    try {
+      if (_selectedType == 'Int32' && customSize >= 4) {
+        _currentPtr!.cast<Int32>().value = int.tryParse(valText) ?? 0;
+      } else if (_selectedType == 'Double' && customSize >= 8) {
+        _currentPtr!.cast<Double>().value = double.tryParse(valText) ?? 0.0;
+      }
+    } catch (e) {
+      // Handle edge cases where pointer cast might fail
     }
 
+    // 5. "Peek" at the raw memory bytes
     final List<int> fetchedBytes = [];
-    for (var i = 0; i < size; i++) {
+    for (int i = 0; i < customSize; i++) {
       fetchedBytes.add(_currentPtr![i]);
     }
 
@@ -50,26 +83,20 @@ class _MemoryInspectorAppState extends State<MemoryInspectorApp> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
-        title: const Text('Native Memory Peek',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: const Color(0xFF161B22),
+        title: const Text("Native Memory Inspector"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildControlPanel(),
-            const SizedBox(height: 30),
-            if (_address != null) ...[
-              AddressHeader(),
-              const SizedBox(height: 20),
-              MemoryGrid(),
-              const SizedBox(height: 30),
-              Explanation(),
-            ]
+            const SizedBox(height: 20),
+            _buildAddressDisplay(),
+            const SizedBox(height: 20),
+            Expanded(child: _buildMemoryGrid()),
           ],
         ),
       ),
@@ -78,81 +105,98 @@ class _MemoryInspectorAppState extends State<MemoryInspectorApp> {
 
   Widget _buildControlPanel() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.purple.withOpacity(0.3)),
+        ),
+        child: Column(
+            children: [
+        Row(
         children: [
-          TextField(
-            controller: _controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: 'Inject Value',
-              labelStyle: TextStyle(color: Colors.grey),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.purpleAccent)),
+        Expanded(
+        child: TextField(
+            controller: _valController,
+            decoration: const InputDecoration(labelText: "Value to Store"),
+        ),
+        ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: _sizeController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: "Struct Size (Bytes)"),
             ),
           ),
-          const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              DropdownButton<String>(
-                dropdownColor: const Color(0xFF161B22),
-                value: _selectedType,
-                style: const TextStyle(color: Colors.purpleAccent),
-                items: ['Int32', 'Double'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                onChanged: (val) => setState(() => _selectedType = val!),
-              ),
-              ElevatedButton(
-                onPressed: _runInspection,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
-                child: const Text('Peek mem', style: TextStyle(color: Colors.white)),
+        ],
+        ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  DropdownButton<String>(
+                    value: _selectedType,
+                    items: ['Int32', 'Double'].map((String value) {
+                      return DropdownMenuItem<String>(value: value, child: Text(value));
+                    }).toList(),
+                    onChanged: (val) => setState(() => _selectedType = val!),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _runInspection,
+                    icon: const Icon(Icons.search),
+                    label: const Text("PEEK RAM"),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
+        ),
+    );
+  }
+
+  Widget _buildAddressDisplay() {
+    return Column(
+      children: [
+        Text(
+          "Base Address: 0x${_address.toRadixString(16).toUpperCase()}",
+          style: const TextStyle(fontSize: 18, color: Colors.purpleAccent, fontWeight: FontWeight.bold),
+        ),
+        const Text("Status: Memory Allocated & Interpreted", style: TextStyle(color: Colors.grey)),
+      ],
+    );
+  }
+
+  Widget _buildMemoryGrid() {
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        childAspectRatio: 1,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
-    );
-  }
-
-  Widget AddressHeader() {
-    return Text(
-      'ADDRESS: 0x${_address!.toRadixString(16).toUpperCase()}',
-      style: const TextStyle(color: Colors.purpleAccent, fontFamily: 'monospace', fontWeight: FontWeight.bold),
-    );
-  }
-
-  Widget MemoryGrid() {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: List.generate(_bytes.length, (index) {
-        bool isActive = _bytes[index] != 0;
+      itemCount: _bytes.length,
+      itemBuilder: (context, index) {
+        final byte = _bytes[index];
         return Container(
-          width: 60,
-          height: 60,
-          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: isActive ? Colors.deepPurple.withOpacity(0.3) : Colors.white.withOpacity(0.05),
-            border: Border.all(color: isActive ? Colors.purpleAccent : Colors.white10, width: 2),
-            borderRadius: BorderRadius.circular(12),
+            color: byte == 0 ? Colors.white.withOpacity(0.02) : Colors.purple.withOpacity(0.2),
+            border: Border.all(color: byte == 0 ? Colors.grey.withOpacity(0.2) : Colors.purpleAccent),
+            borderRadius: BorderRadius.circular(8),
           ),
-          child: Text(
-            _bytes[index].toRadixString(16).padLeft(2, '0').toUpperCase(),
-            style: TextStyle(color: isActive ? Colors.white : Colors.grey[700], fontWeight: FontWeight.bold),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text("Byte $index", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              Text(
+                byte.toRadixString(16).padLeft(2, '0').toUpperCase(),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              Text("$byte", style: const TextStyle(fontSize: 10, color: Colors.purpleAccent)),
+            ],
           ),
         );
-      }),
-    );
-  }
-
-  Widget Explanation() {
-    return Text(
-      'The value "${_controller.text}" is stored as a $_selectedType across ${_bytes.length} bytes.',
-      style: const TextStyle(color: Colors.grey, fontSize: 13),
+      },
     );
   }
 }
