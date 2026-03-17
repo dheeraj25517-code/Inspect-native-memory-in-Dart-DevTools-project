@@ -15,7 +15,7 @@ This prototype demonstrates how raw memory addresses can be visualized and inter
 * ffi/pkg: For native memory management (`malloc`/`free`).
 
 ## Core Concept: The "Human" UI
-In standard debuggers, a `Pointer` is just a hex address (e.g., `0x7b40`). This tool turns that address into a visual representation of RAM:
+In standard debuggers, a Pointer is just a hex address (e.g., `0x7b40`). This tool turns that address into a visual representation of RAM:
 
 
 
